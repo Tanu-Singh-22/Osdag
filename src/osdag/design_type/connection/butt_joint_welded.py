@@ -454,7 +454,17 @@ class ButtJointWelded(MomentConnection):
         
     def set_input_values(self, design_dictionary):
         "initialisation of components required to design a butt joint welded along with connection"
-        super(ButtJointWelded,self).set_input_values(self, design_dictionary)
+        # Call parent class's set_input_values with default values if not provided
+        design_dictionary_with_defaults = design_dictionary.copy()
+        if KEY_SHEAR not in design_dictionary_with_defaults:
+            design_dictionary_with_defaults[KEY_SHEAR] = 0.0  # Default shear value if not provided
+        if KEY_AXIAL not in design_dictionary_with_defaults:
+            design_dictionary_with_defaults[KEY_AXIAL] = 0.0  # Default axial value if not provided
+        if KEY_MOMENT not in design_dictionary_with_defaults:
+            design_dictionary_with_defaults[KEY_MOMENT] = 0.0  # Default moment value if not provided
+        
+        # Call parent class method correctly
+        super(ButtJointWelded, self).set_input_values(self,design_dictionary_with_defaults)
         print(design_dictionary,"input values are set. Doing preliminary member checks")
         self.module = design_dictionary[KEY_MODULE]
         self.mainmodule = "Butt Joint Welded Connection"
@@ -573,3 +583,174 @@ class ButtJointWelded(MomentConnection):
         Tmin = min(plate1_thk, plate2_thk)
         self.s_max = Tmin - 1.5
 
+        # Check weld size constraints
+        if self.weld_size < self.s_min or self.weld_size > self.s_max:
+            self.design_status = False
+            if self.weld_size < self.s_min:
+                logger.error(": Weld size {} mm is less than the minimum required weld size of {} mm [Ref. Table 21, Cl.10.5.2.3, IS 800:2007].".format(
+                    self.weld_size, self.s_min))
+                logger.info(": Increase the weld size.")
+            else:
+                logger.error(": Weld size {} mm is greater than the maximum allowed weld size of {} mm [Ref. Cl.10.5.3.1, IS 800:2007].".format(
+                    self.weld_size, self.s_max))
+                logger.info(": Decrease the weld size.")
+            logger.error(": Design is unsafe. \n")
+            logger.info(" :=========End Of design===========")
+            return
+        
+        # Calculate weld length since size is acceptable
+        if "shop weld" in self.weld_type.lower():
+            self.gamma_mw = 1.25
+        else:
+            self.gamma_mw = 1.50
+
+        self.f_w = self.fu / (math.sqrt(3) * self.gamma_mw)  # Design strength of weld
+
+        if "single" in self.cover_plate.lower():
+            self.N_f = 1  # Number of welds
+        else:
+            self.N_f = 2  # Double cover plate means two weld interfaces
+
+                # Calculate required weld length 
+        self.L_req = self.tensile_force / (self.N_f * 0.707 * self.weld_size * self.f_w)
+            
+        # Check if straight weld is sufficient
+        if self.L_req <= self.plates_width:
+            logger.info(": Straight weld will be provided as required length is less than plate width")
+            self.weld_length_provided = self.plates_width
+            self.weld_length_effective = self.weld_length_provided
+            self.weld_angle = 0
+            self.side_weld_length = 0
+
+        else:
+            # Calculate skewed weld parameters
+            L_target = self.L_req / self.N_f  # Required length per weld line
+        
+            # Calculate skew angle
+            self.weld_angle = math.degrees(math.atan((L_target - self.plates_width)/(2 * self.plates_width)))
+
+            # Constrain angle between 20-60 degrees
+            if self.weld_angle < 20:
+                self.weld_angle = 20
+            elif self.weld_angle > 60:
+                self.weld_angle = 60
+
+            # Calculate provided length per weld line with skew
+            L_provided_line = self.plates_width + 2 * self.plates_width * math.tan(math.radians(self.weld_angle))
+            L_provided_total = self.N_f * L_provided_line
+
+            # Check if side welds are needed
+            if L_provided_total < self.L_req:
+                # Calculate required side weld length
+                L_side = (self.L_req - L_provided_total) / self.N_f
+
+                # Calculate minimum return weld length
+                min_return = max(2 * self.weld_size, 10)  # As per IS 800:2007 Cl 10.5.10.2
+                L_side = max(L_side, min_return)
+
+                self.side_weld_length = L_side
+            else:
+                self.side_weld_length = 0
+
+            self.weld_length_provided = L_provided_total
+            self.weld_length_effective = L_provided_total + (2 * self.side_weld_length * self.N_f)
+
+            logger.info(": Skewed weld will be provided with angle {:.2f} degrees".format(self.weld_angle))
+            
+        # Update output values for UI display
+        self.output_values[KEY_OUT_WELD_LENGTH] = self.weld_length_effective
+    
+    def weld_strength_verification(self, design_dictionary):
+        # Extract required values from the design dictionary
+        self.weld_size = float(design_dictionary[KEY_WELD_SIZE])
+        self.tensile_force = float(design_dictionary[KEY_TENSILE_FORCE])
+        
+        # Ensure we have weld_length_provided from previous calculation
+        if not hasattr(self, 'weld_length_provided'):
+            logger.error(": Weld length must be calculated before strength verification")
+            self.design_status = False
+            return
+            
+        # Calculate effective length by subtracting 2 times weld size from provided length
+        self.weld_length_effective = self.weld_length_provided - (2 * self.weld_size)
+        
+        # Check if effective length meets minimum requirement of 4 times weld size
+        min_length = 4 * self.weld_size
+        if self.weld_length_effective < min_length:
+            self.design_status = False
+            logger.error(f": Effective weld length {self.weld_length_effective:.2f} mm is less than minimum required length {min_length:.2f} mm")
+            logger.info(": Increase the weld length or size")
+            return
+            
+        # Calculate weld strength
+        self.weld_strength = self.f_w * 0.707 * self.weld_size * self.weld_length_effective * self.N_f
+        
+        # Check if weld strength is adequate
+        if self.weld_strength < self.tensile_force:
+            self.design_status = False
+            logger.error(f": Weld strength {self.weld_strength:.2f} N is less than required force {self.tensile_force:.2f} N")
+            logger.info(": Increase weld size or length")
+            return
+        else:
+            self.design_status = True
+            self.utilization_ratio = self.tensile_force / self.weld_strength
+            logger.info(f": Weld strength verification successful with utilization ratio {self.utilization_ratio:.2f}")
+    
+    def long_joint_reduction_factor(self):
+        """Calculate reduction factor for long joints according to IS 800:2007 Cl. 10.5.7.1(b)"""
+        
+        # Calculate effective throat thickness
+        a = 0.707 * self.weld_size
+        
+        # Check if reduction is needed
+        if self.weld_length_effective <= 150 * a:
+            self.beta_L = 1.0
+            logger.info(": No reduction for long joints required as length is less than 150 times throat thickness")
+            return
+            
+        # Calculate reduction factor
+        self.beta_L = 1.2 - (0.2 * self.weld_length_effective)/(150 * a)
+        
+        # Ensure minimum value of 0.8
+        self.beta_L = max(0.8, self.beta_L)
+        
+        # Adjust weld design strength
+        self.f_w_adjusted = self.f_w * self.beta_L
+        
+        logger.info(f": Long joint reduction factor βL = {self.beta_L:.2f}")
+        logger.info(f": Adjusted weld design strength = {self.f_w_adjusted:.2f} N/mm²")
+
+    def check_base_metal_strength(self, design_dictionary):
+        """Check strength of base metal according to IS 800:2007"""
+        
+        # changed this check
+        material_grade = design_dictionary[KEY_MATERIAL]
+        material_obj = Material(material_grade)
+        self.fy = material_obj.fy
+        self.fu = material_obj.fu
+        
+        # Partial safety factors
+        self.gamma_m0 = 1.10  # For yielding
+        self.gamma_m1 = 1.25  # For rupture
+        
+        # Calculate areas
+        Tmin = min(float(design_dictionary[KEY_PLATE1_THICKNESS]), 
+                   float(design_dictionary[KEY_PLATE2_THICKNESS]))
+        self.A_g = Tmin * self.plates_width
+        self.A_n = self.A_g  # For welded joints, net area equals gross area
+        
+        # Calculate design strength based on yielding and rupture
+        T_dy = self.A_g * self.fy / self.gamma_m0
+        T_du = 0.9 * self.A_n * self.fu / self.gamma_m1
+        
+        # Design base metal strength is minimum of the two
+        self.T_db = min(T_dy, T_du)
+        
+        # Check if design force is less than base metal strength
+        if self.tensile_force > self.T_db:
+            self.design_status = False
+            logger.error(f": Base metal strength {self.T_db:.2f} N is less than required force {self.tensile_force:.2f} N")
+            logger.info(": Design is unsafe. Increase plate dimensions or use higher grade material")
+            return
+        else:
+            logger.info(f": Base metal strength check passed. Utilization ratio = {self.tensile_force/self.T_db:.2f}")
