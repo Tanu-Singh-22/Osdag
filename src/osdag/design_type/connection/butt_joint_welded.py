@@ -24,7 +24,7 @@ import logging
 
 import math
 
-from PyQt5 import Qt
+from PyQt5.QtCore import Qt
 
 class ButtJointWelded(MomentConnection):
     def __init__(self):
@@ -42,7 +42,7 @@ class ButtJointWelded(MomentConnection):
         self.weld_fabrication = None
         self.weld_angle = None
         self.weld_length_effective = None
-        self.utilization_ratio = None
+
 
     ###############################################
     # Design Preference Functions Start
@@ -87,7 +87,7 @@ class ButtJointWelded(MomentConnection):
         defaults = {
             #chnged design preference values for weld fabrication and material grade t.s.
             KEY_DP_WELD_TYPE:"Shop weld",
-            KEY_DP_WELD_MATERIAL_G_O:"E70XX", # not sure about what value to write in default t.s.
+            KEY_DP_WELD_MATERIAL_G_O:"450", # not sure about what value to write in default t.s.
             KEY_DP_DETAILING_EDGE_TYPE: "Sheared or hand flame cut",
             KEY_DP_DETAILING_PACKING_PLATE: "Yes" 
         }
@@ -158,7 +158,7 @@ class ButtJointWelded(MomentConnection):
     def weld_values(self, input_dictionary):
         values = {
             KEY_DP_WELD_TYPE:'Shop weld',
-            KEY_DP_WELD_MATERIAL_G_O:'E70XX', # not sure about what value to write in default t.s.
+            KEY_DP_WELD_MATERIAL_G_O:'450', # not sure about what value to write in default t.s.
         }
 
         for key in values.keys():
@@ -309,29 +309,33 @@ class ButtJointWelded(MomentConnection):
         out_list.append(t44)
 
         t22 = (KEY_OUT_UTILISATION_RATIO, KEY_OUT_DISP_UTILISATION_RATIO, TYPE_TEXTBOX,
-               f"{self.utilization_ratio:.2f}", True)
+               self.utilization_ratio if flag else '', True)
         out_list.append(t22)
 
-        cover_type = "Double" if self.planes == 2 else "Single"
+        # Calculate cover_type only if flag is True and we have the planes attribute
+        cover_type = ''
+        if flag and hasattr(self, 'planes'):
+            cover_type = "Double" if self.planes == 2 else "Single"
+            
         t13 = (KEY_OUT_NO_COVER_PLATE, KEY_OUT_DISP_NO_COVER_PLATE, TYPE_TEXTBOX,
-               cover_type, True)
+               cover_type if flag else '', True)
         out_list.append(t13)
 
         t38 = (KEY_OUT_WIDTH_COVER_PLATE, KEY_OUT_DISP_WIDTH_COVER_PLATE, TYPE_TEXTBOX,
-               f"{self.width:.2f}", True)
+               self.width if flag else '', True)
         out_list.append(t38)
 
         t28 = (KEY_OUT_LENGTH_COVER_PLATE, KEY_OUT_DISP_LENGTH_COVER_PLATE, TYPE_TEXTBOX,
-               f"{self.connection_length:.2f}", True)
+               self.weld_length_provided if flag else '', True)
         out_list.append(t28)
 
         t47 = (KEY_OUT_THICKNESS_COVER_PLATE, KEY_OUT_DISP_THICKNESS_COVER_PLATE, TYPE_TEXTBOX,
-               f"{self.Tcp:.2f}", True)
+               self.calculated_cover_plate_thickness if flag else '', True)
         out_list.append(t47)
 
-        if self.packing_thickness > 0:
+        if hasattr(self, 'packing_thickness') and self.packing_thickness > 0:
             t15 = (KEY_PK_PLTHK, KEY_DISP_PK_PLTHK, TYPE_TEXTBOX,
-                  f"{self.packing_thickness:.2f}", True)
+                  self.packing_thickness if flag else '', True)
             out_list.append(t15)
 
         # Weld details
@@ -339,23 +343,23 @@ class ButtJointWelded(MomentConnection):
         out_list.append(t21)
 
         t23 = (KEY_OUT_WELD_TYPE, KEY_OUT_DISP_WELD_TYPE, TYPE_TEXTBOX,
-               "Fillet", True)
+               "Fillet" if flag else '', True)
         out_list.append(t23)
 
         t24 = (KEY_OUT_WELD_SIZE, KEY_OUT_DISP_WELD_SIZE, TYPE_TEXTBOX,
-               f"{self.weld_size:.2f}", True)
+               self.weld_size if flag else '', True)
         out_list.append(t24)
 
         t25 = (KEY_OUT_WELD_STRENGTH, KEY_OUT_DISP_WELD_STRENGTH, TYPE_TEXTBOX,
-               f"{self.weld_strength:.2f}", True)
+               self.weld_strength if flag else '', True)
         out_list.append(t25)
 
         t26 = (KEY_OUT_WELD_LENGTH_EFF, KEY_OUT_DISP_WELD_LENGTH_EFF, TYPE_TEXTBOX,
-               f"{self.weld_length_effective:.2f}", True)
+               self.weld_length_effective if flag else '', True)
         out_list.append(t26)
 
         t27 = (KEY_OUT_BOLT_CONN_LEN, KEY_OUT_DISP_BOLT_CONN_LEN, TYPE_TEXTBOX,
-               f"{self.connection_length:.2f}", True)
+               self.weld_length_provided if flag else '', True)
         out_list.append(t27)
 
         return out_list
@@ -451,7 +455,7 @@ class ButtJointWelded(MomentConnection):
             self.set_input_values(self, design_dictionary)
         else:
             return all_errors
-        
+
     def set_input_values(self, design_dictionary):
         "initialisation of components required to design a butt joint welded along with connection"
         # Call parent class's set_input_values with default values if not provided
@@ -485,11 +489,11 @@ class ButtJointWelded(MomentConnection):
                             material_grade=design_dictionary[KEY_MATERIAL],
                             width=design_dictionary[KEY_PLATE_WIDTH])
         
-        self.weld = Weld(size=design_dictionary[KEY_DP_WELD_SIZE],
-                         edge_type=design_dictionary[KEY_DP_DETAILING_EDGE_TYPE],
-                         material_g_o=design_dictionary[KEY_DP_WELD_MATERIAL_G_O],
-                         type=design_dictionary[KEY_DP_WELD_TYPE]
-                         )
+        self.weld = Weld(material_g_o=design_dictionary[KEY_DP_WELD_MATERIAL_G_O],
+                         type=design_dictionary[KEY_DP_WELD_TYPE],
+                         fabrication=design_dictionary.get(KEY_DP_FAB_SHOP, KEY_DP_FAB_SHOP))
+        # Set weld size after creating the weld object
+        self.weld.size = design_dictionary[KEY_WELD_SIZE]
         # Start design process
         print("input values are set. Doing preliminary member checks")
         self.member_design_status = False
@@ -498,8 +502,6 @@ class ButtJointWelded(MomentConnection):
         self.weld_design_status = False
         self.thick_design_status = False
         self.plate_design_status = False
-        self.initial_member_capacity(self,design_dictionary)
-
 
         plate1_thk = float(design_dictionary[KEY_PLATE1_THICKNESS])
         plate2_thk = float(design_dictionary[KEY_PLATE2_THICKNESS])
@@ -541,10 +543,8 @@ class ButtJointWelded(MomentConnection):
             self.packing_plate_thickness = 0.0
 
         self.leg_size = 0
-        self.effective_throat_thickness = 0
         self.yield_strength = 0
         self.partial_safety_factor = 0
-        self.design_strength = 0
         self.max_weld_size = 0
         #change from here
         self.final_pitch = 0
@@ -561,24 +561,47 @@ class ButtJointWelded(MomentConnection):
         self.blg = 0
         self.cover_plate = design_dictionary[KEY_COVER_PLATE]
         
-        # Start bolt selection process
+        # Start design process
         self.design_of_weld(self,design_dictionary)
     
-    def design_of_weld(self,design_dictionary):
-        self.effective_throat_thickness = 0
-        self.design_strength = 0
+    #========================DESIGN OF WELD==================================================================
+    def design_of_weld(self, design_dictionary):
+        # Calculate effective throat thickness based on weld size
         self.weld_size = float(design_dictionary[KEY_WELD_SIZE])
-        self.effective_throat_thickness = 0.707 * self.weld_size
+        self.effective_throat_thickness = 0.707 * self.weld_size  
+        
+        self.fu = float(design_dictionary[KEY_DP_WELD_MATERIAL_G_O]) 
+        
+        # Determine weld type and set gamma_mw based on it
         weld_type = design_dictionary[KEY_DP_WELD_TYPE]
         if weld_type == "Shop weld":
             self.gamma_mw = 1.25  
         else:  
             self.gamma_mw = 1.50  
-        self.plate1.connect_to_database_to_get_fy_fu(design_dictionary[KEY_MATERIAL], float(design_dictionary[KEY_PLATE1_THICKNESS]))
-        self.fy = float(self.plate1.fy)  
-        self.weld_design_strength = self.fy / (math.sqrt(3) * self.gamma_mw)
+            
+        # Calculate weld design strength
+        self.weld_design_strength = self.fu / (math.sqrt(3) * self.gamma_mw)
+        
+        # Call the design sequence methods in order
+        self.weld_length(self,design_dictionary)
+        self.weld_strength_verification(self,design_dictionary)
+        self.long_joint_reduction_factor(self)
+        self.check_base_metal_strength(self,design_dictionary)
+
+    def weld_length(self, design_dictionary):
+        self.tensile_force = float(design_dictionary[KEY_TENSILE_FORCE])
+        self.plates_width = float(design_dictionary[KEY_PLATE_WIDTH])
+        self.weld_size = float(design_dictionary[KEY_WELD_SIZE])
+        self.cover_plate = design_dictionary[KEY_COVER_PLATE]
+        # Dictionary to store output values for UI display
+        self.weld_output_values = {}
+        self.material = design_dictionary[KEY_MATERIAL]
+        self.fu = float(design_dictionary[KEY_DP_WELD_MATERIAL_G_O])
+        self.weld_type = design_dictionary[KEY_DP_WELD_TYPE]
         plate1_thk = float(design_dictionary[KEY_PLATE1_THICKNESS])
         plate2_thk = float(design_dictionary[KEY_PLATE2_THICKNESS])
+
+        # Calculate minimum and maximum weld sizes
         self.s_min = IS800_2007.cl_10_5_2_3_min_weld_size(plate1_thk, plate2_thk)
         Tmin = min(plate1_thk, plate2_thk)
         self.s_max = Tmin - 1.5
@@ -658,7 +681,7 @@ class ButtJointWelded(MomentConnection):
             logger.info(": Skewed weld will be provided with angle {:.2f} degrees".format(self.weld_angle))
             
         # Update output values for UI display
-        self.output_values[KEY_OUT_WELD_LENGTH] = self.weld_length_effective
+        self.weld_output_values[KEY_OUT_WELD_LENGTH] = self.weld_length_effective
     
     def weld_strength_verification(self, design_dictionary):
         # Extract required values from the design dictionary
@@ -723,7 +746,7 @@ class ButtJointWelded(MomentConnection):
     def check_base_metal_strength(self, design_dictionary):
         """Check strength of base metal according to IS 800:2007"""
         
-        # changed this check
+        # Extract material properties and handle material grade strings
         material_grade = design_dictionary[KEY_MATERIAL]
         material_obj = Material(material_grade)
         self.fy = material_obj.fy

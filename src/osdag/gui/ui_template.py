@@ -2060,12 +2060,33 @@ class Window(QMainWindow):
             status = main.design_status
             print(f"status{status}")
             print(f"trigger_type{trigger_type}")
+            print(f"main object type: {type(main)}")
+            print(f"main object dir: {dir(main)}")
 
             if error is not None:
                 self.show_error_msg(error)
                 return
 
-            out_list = main.output_values(main, status)
+            print("Type of output_values:", type(main.output_values))
+            print("Output values attribute:", main.output_values)
+            
+            # Create an instance if main is a class
+            if isinstance(main, type):
+                instance = main()
+                # Copy necessary attributes from main to instance
+                attributes_to_copy = [
+                    'design_status', 'utilization_ratio', 'width', 
+                    'weld_length_provided', 'Tcp', 'packing_thickness',
+                    'weld_size', 'weld_strength', 'weld_length_effective',
+                    'planes'  # needed for cover_type calculation
+                ]
+                for attr in attributes_to_copy:
+                    if hasattr(main, attr):
+                        setattr(instance, attr, getattr(main, attr))
+                out_list = instance.output_values(status)
+            else:
+                out_list = main.output_values(status)
+                
             print('out_list changed',out_list)
 
             for option in out_list:
