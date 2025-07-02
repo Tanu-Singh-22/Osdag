@@ -42,6 +42,8 @@ class ButtJointWelded(MomentConnection):
         self.weld_fabrication = None
         self.weld_angle = None
         self.weld_length_effective = None
+        self.plate1thk = None
+        self.plate2thk = None
 
 
     ###############################################
@@ -493,6 +495,15 @@ class ButtJointWelded(MomentConnection):
         self.plate2 = Plate(thickness=[design_dictionary[KEY_PLATE2_THICKNESS]],
                             material_grade=design_dictionary[KEY_MATERIAL],
                             width=design_dictionary[KEY_PLATE_WIDTH])
+        # Set plate thickness attributes for compatibility
+        if isinstance(self.plate1.thickness, list):
+            self.plate1thk = self.plate1.thickness[0]
+        else:
+            self.plate1thk = self.plate1.thickness
+        if isinstance(self.plate2.thickness, list):
+            self.plate2thk = self.plate2.thickness[0]
+        else:
+            self.plate2thk = self.plate2.thickness
         
         self.weld = Weld(material_g_o=design_dictionary[KEY_DP_WELD_MATERIAL_G_O],
                          type=design_dictionary[KEY_DP_WELD_TYPE],
