@@ -3,10 +3,16 @@ import yaml
 import shutil
 import time
 import pandas as pd
+import cairosvg
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
+from PyQt5.QtGui import QRegExpValidator, QDoubleValidator, QBrush, QColor, QPixmap, QFont
+from PyQt5.QtWidgets import QDialog, QMainWindow, QMessageBox, QDesktopWidget
+from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDockWidget
+from PyQt5.QtWidgets import QFileDialog, QProgressBar, QLabel
+from PyQt5.QtWidgets import QScrollArea, QTableWidgetItem, QComboBox
+from PyQt5.QtWidgets import QLineEdit, QVBoxLayout, QColorDialog
+from PyQt5.QtWidgets import QFrame, QSplitter, QTableWidget
+from PyQt5.QtCore import QThread, pyqtSignal, Qt, QEvent, QObject, QRegExp, QRect
 from .ui_tutorial import Ui_Tutorial
 from .ui_aboutosdag import Ui_AboutOsdag
 from .ui_ask_question import Ui_AskQuestion
@@ -46,6 +52,7 @@ from ..design_type.connection.beam_beam_end_plate_splice import BeamBeamEndPlate
 from ..design_type.connection.column_end_plate import ColumnEndPlate
 from ..design_type.connection.column_cover_plate_weld import ColumnCoverPlateWeld
 from ..design_type.connection.base_plate_connection import BasePlateConnection
+from ..design_type.connection.lap_joint_bolted import LapJointBolted
 from ..design_type.tension_member.tension_bolted import Tension_bolted
 from ..design_type.tension_member.tension_welded import Tension_welded
 from ..design_type.connection.beam_column_end_plate import BeamColumnEndPlate
@@ -582,7 +589,7 @@ class Window(QMainWindow):
         for option in option_list:
             lable = option[1]
             type = option[2]
-            if type not in [TYPE_TITLE, TYPE_IMAGE, TYPE_MODULE, TYPE_IMAGE_COMPRESSION]:
+            if type not in [TYPE_TITLE, TYPE_IMAGE, TYPE_MODULE, TYPE_IMAGE_COMPRESSION,TYPE_IMAGE_BIGGER]:
                 l = QtWidgets.QLabel(self.dockWidgetContents)
                 l.setObjectName(option[0] + "_label")
                 l.setText(_translate("MainWindow", "<html><head/><body><p>" + lable + "</p></body></html>"))
@@ -752,6 +759,17 @@ class Window(QMainWindow):
                 i = i + 30
                 im.setFixedSize(im.size())
                 in_layout2.addWidget(im, j, 2, 1, 1)
+            
+            if type == TYPE_IMAGE_BIGGER:
+                im = QtWidgets.QLabel(self.dockWidgetContents)
+                im.setGeometry(QtCore.QRect(190, 10 + i, 420, 400))
+                im.setObjectName(option[0])
+                im.setScaledContents(True)
+                pixmap = QPixmap(option[3])
+                im.setPixmap(pixmap)
+                i = i + 30
+                im.setFixedSize(im.size())
+                in_layout2.addWidget(im, j, 1, 1, 1)
 
             if type == TYPE_IMAGE_COMPRESSION:
                 imc = QtWidgets.QLabel(self.dockWidgetContents)
@@ -841,18 +859,17 @@ class Window(QMainWindow):
                                                   if all_values_available not in disabled_values]
             try:
                 print(f"<class 'AttributeError'>: {d} \n {new_list}")
-                d.get(new_list[0][0]).activated.connect(lambda: self.popup(d.get(new_list[0][0]), new_list,updated_list,data))
-                d.get(new_list[1][0]).activated.connect(lambda: self.popup(d.get(new_list[1][0]), new_list,updated_list,data))
-                d.get(new_list[2][0]).activated.connect(lambda: self.popup(d.get(new_list[2][0]), new_list,updated_list,data))
-                d.get(new_list[3][0]).activated.connect(lambda: self.popup(d.get(new_list[3][0]), new_list,updated_list,data))
-                d.get(new_list[4][0]).activated.connect(lambda: self.popup(d.get(new_list[4][0]), new_list,updated_list,data))
-                d.get(new_list[5][0]).activated.connect(lambda: self.popup(d.get(new_list[5][0]), new_list,updated_list,data))
-                d.get(new_list[6][0]).activated.connect(lambda: self.popup(d.get(new_list[6][0]), new_list,updated_list,data))
-                d.get(new_list[7][0]).activated.connect(lambda: self.popup(d.get(new_list[7][0]), new_list,updated_list,data))
-                d.get(new_list[8][0]).activated.connect(lambda: self.popup(d.get(new_list[8][0]), new_list,updated_list,data))
-                d.get(new_list[9][0]).activated.connect(lambda: self.popup(d.get(new_list[9][0]), new_list,updated_list,data))
-                d.get(new_list[10][0]).activated.connect(lambda: self.popup(d.get(new_list[10][0]), new_list,updated_list,data))
-            except IndexError:
+
+                #changed this code bcz an error was occuring in the code -t.s.
+                # Connect signals only for widgets that exist
+                for i in range(11):  # We were trying to connect 11 items before
+                    if i < len(new_list):
+                        widget = d.get(new_list[i][0])
+                        if widget is not None and hasattr(widget, 'activated'):
+                            widget.activated.connect(lambda checked, w=widget: self.popup(w, new_list, updated_list, data))
+            except Exception as e:
+                print(f"Error connecting signals: {str(e)}")
+                # changed ended here -t.s.
                 pass
 
         # Change in Ui based on Connectivity selection
@@ -865,7 +882,6 @@ class Window(QMainWindow):
         else:
             for t in updated_list:
                 for key_name in t[0]:
-                    
                     key_changed = self.dockWidgetContents.findChild(QtWidgets.QWidget, key_name)
                     self.on_change_connect(key_changed, updated_list, data, main)
                     print(f"key_name{key_name} \n key_changed{key_changed}  \n self.on_change_connect ")
@@ -1777,11 +1793,10 @@ class Window(QMainWindow):
                     key = tab.findChild(QtWidgets.QWidget, key_name)
                     if key is None:
                         continue
-                    if input_type == TYPE_TEXTBOX:
+                    if isinstance(key, QtWidgets.QLineEdit):
                         val = key.text()
-                        print(f"design_fn val = {val}\n")
                         design_dictionary.update({key_name: val})
-                    elif input_type == TYPE_COMBOBOX:
+                    elif isinstance(key, QtWidgets.QComboBox):
                         val = key.currentText()
                         design_dictionary.update({key_name: val})
         else:
@@ -1866,6 +1881,8 @@ class Window(QMainWindow):
             return Flexure_Cantilever
         elif name == KEY_DISP_FLEXURE3:
             return Flexure_Misc
+        elif name == KEY_DISP_LAPJOINTBOLTED:
+            return LapJointBolted
         else:
             return GussetConnection
 # Function for getting inputs from a file
@@ -1965,7 +1982,11 @@ class Window(QMainWindow):
                                 str(key_str) + ": (" + str(uiObj[key_str]) + ") - Load should be positive integer! \n"
                             uiObj[key_str] = ""
 
-                    key.setText(uiObj[key_str] if uiObj[key_str] != 'Disabled' else "")
+                    # Convert list values to string before setting text
+                    value = uiObj[key_str]
+                    if isinstance(value, list):
+                        value = value[0] if value else ""
+                    key.setText(value if value != 'Disabled' else "")
             elif op[2] == TYPE_COMBOBOX_CUSTOMIZED:
                 if key_str in uiObj.keys():
                     for n in new:
@@ -2105,7 +2126,7 @@ class Window(QMainWindow):
                                                   KEY_DISP_ENDPLATE, KEY_DISP_BASE_PLATE, KEY_DISP_SEATED_ANGLE, KEY_DISP_TENSION_BOLTED,
                                                   KEY_DISP_TENSION_WELDED, KEY_DISP_COLUMNCOVERPLATE, KEY_DISP_COLUMNCOVERPLATEWELD,
                                                   KEY_DISP_COLUMNENDPLATE, KEY_DISP_BCENDPLATE, KEY_DISP_BB_EP_SPLICE,
-                                                  KEY_DISP_COMPRESSION_COLUMN,KEY_DISP_FLEXURE,KEY_DISP_FLEXURE2,KEY_DISP_COMPRESSION_Strut]: # , KEY_DISP_FLEXURE
+                                                  KEY_DISP_COMPRESSION_COLUMN,KEY_DISP_FLEXURE,KEY_DISP_FLEXURE2,KEY_DISP_COMPRESSION_Strut,KEY_DISP_LAPJOINTBOLTED]: # , KEY_DISP_FLEXURE
                 # print(self.display, self.folder, main.module, main.mainmodule)
                 print("common start")
                 print(f"main object type: {type(main)}")
@@ -2134,24 +2155,7 @@ class Window(QMainWindow):
                     action.setEnabled(True)
                 fName = str('./ResourceFiles/images/3d.png')
                 file_extension = fName.split(".")[-1]
-
-                # if file_extension == 'png':
-                #     self.display.ExportToImage(fName)
-                #     im = Image.open('./ResourceFiles/images/3d.png')
-                #     w,h=im.size
-                #     if(w< 640 or h < 360):
-                #         print('Re-taking Screenshot')
-                #         self.resize(700,500)
-                #         self.outputDock.hide()
-                #         self.inputDock.hide()
-                #         self.textEdit.hide()
-                #         QTimer.singleShot(0, lambda:self.retakeScreenshot(fName))
-
             else:
-                for fName in ['3d.png', 'top.png',
-                              'front.png', 'side.png']:
-                    with open("./ResourceFiles/images/"+fName, 'w'):
-                        pass
                 self.display.EraseAll()
                 for chkbox in main.get_3d_components(main):
                     self.frame.findChild(QtWidgets.QCheckBox, chkbox[0]).setEnabled(False)
